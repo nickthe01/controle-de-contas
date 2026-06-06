@@ -3,6 +3,7 @@
 import { useState, useMemo } from 'react'
 import type { Transaction, CreditCard, CreditCardTransaction, Bill, SalaryConfig, ExtraIncome, Payment } from '@/lib/types'
 import CurrencyInput, { parseCurrency } from './CurrencyInput'
+import VoiceButton, { type ParsedTransaction } from './VoiceButton'
 
 const MONTHS_SHORT = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez']
 
@@ -184,6 +185,13 @@ export default function DashboardTab({ transactions, cards, cardTransactions, bi
   }
 
   function openCreate() { setEditingTx(null); setForm(blankForm()); setError(null); setShowModal(true) }
+
+  function openWithVoice(parsed: ParsedTransaction) {
+    setEditingTx(null)
+    setForm({ description: parsed.description, amount: parsed.amount, type: parsed.type, category: parsed.category, date: parsed.date })
+    setError(null)
+    setShowModal(true)
+  }
   function openEdit(tx: Transaction) {
     setEditingTx(tx)
     setForm({ description: tx.description, amount: String(Number(tx.amount).toFixed(2)).replace('.', ','), type: tx.type, category: tx.category, date: tx.date })
@@ -607,6 +615,9 @@ export default function DashboardTab({ transactions, cards, cardTransactions, bi
           )}
         </div>
       </div>
+
+      {/* ── BOTÃO DE VOZ ── */}
+      <VoiceButton onResult={openWithVoice} />
 
       {/* ── MODAL ── */}
       {showModal && (
