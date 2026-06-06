@@ -55,3 +55,12 @@ export interface ExtraIncome {
   date: string
   created_at: string
 }
+
+export interface Payment {
+  id: string
+  reference_type: 'bill' | 'card_tx'
+  reference_id: string
+  year: number
+  month: number
+  paid_at: string
+}

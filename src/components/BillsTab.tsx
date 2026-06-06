@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useMemo } from 'react'
-import type { Bill } from '@/lib/types'
+import type { Bill, Payment } from '@/lib/types'
 import CurrencyInput, { parseCurrency } from './CurrencyInput'
 
 const MONTHS_SHORT = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez']
@@ -39,12 +39,13 @@ function getBillProgress(bill: Bill, currentDate: Date) {
 interface Props {
   bills: Bill[]
   currentDate: Date
+  payments: Payment[]
   onRefresh: () => void
 }
 
 const defaultForm = () => ({ description: '', amount: '', due_day: '', is_recurring: false, total_months: '' })
 
-export default function BillsTab({ bills, currentDate, onRefresh }: Props) {
+export default function BillsTab({ bills, currentDate, payments, onRefresh }: Props) {
   const [showModal, setShowModal] = useState(false)
   const [editingBill, setEditingBill] = useState<Bill | null>(null)
   const [form, setForm] = useState(defaultForm())
@@ -54,6 +55,29 @@ export default function BillsTab({ bills, currentDate, onRefresh }: Props) {
   const activeBills = useMemo(() => bills.filter(b => b.is_active), [bills])
   const totalActive = useMemo(() => activeBills.reduce((s, b) => s + Number(b.amount), 0), [activeBills])
   const today = currentDate.getDate()
+  const year = currentDate.getFullYear()
+  const month = currentDate.getMonth()
+
+  function isBillPaid(billId: string) {
+    return payments.some(p => p.reference_type === 'bill' && p.reference_id === billId)
+  }
+
+  async function toggleBillPayment(billId: string) {
+    const existing = payments.find(p => p.reference_type === 'bill' && p.reference_id === billId)
+    if (existing) {
+      await fetch(`/api/payments/${existing.id}`, { method: 'DELETE' })
+    } else {
+      await fetch('/api/payments', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reference_type: 'bill', reference_id: billId, year, month }),
+      })
+    }
+    onRefresh()
+  }
+
+  const paidCount = activeBills.filter(b => isBillPaid(b.id)).length
+  const paidTotal = activeBills.filter(b => isBillPaid(b.id)).reduce((s, b) => s + Number(b.amount), 0)
 
   const nextBill = useMemo(() =>
     activeBills
@@ -154,6 +178,18 @@ export default function BillsTab({ bills, currentDate, onRefresh }: Props) {
               <p className="text-[10px] uppercase opacity-60 mt-0.5">Próximo</p>
             </div>
           </div>
+          {activeBills.length > 0 && (
+            <div className="mt-4 pt-4 border-t border-white/20">
+              <div className="flex items-center justify-between mb-2 text-xs">
+                <span className="opacity-60">{paidCount}/{activeBills.length} pagos</span>
+                <span className="font-bold text-white">{fmt(paidTotal)}</span>
+              </div>
+              <div className="h-1.5 bg-white/20 rounded-full overflow-hidden">
+                <div className="h-full bg-white rounded-full transition-all"
+                  style={{ width: `${activeBills.length > 0 ? (paidCount / activeBills.length) * 100 : 0}%` }} />
+              </div>
+            </div>
+          )}
         </div>
       </div>
 
@@ -189,6 +225,7 @@ export default function BillsTab({ bills, currentDate, onRefresh }: Props) {
             const meta = getBillMeta(bill.description)
             const status = getDueStatus(bill.due_day)
             const progress = getBillProgress(bill, currentDate)
+            const paid = isBillPaid(bill.id)
             return (
               <div key={bill.id}
                 className={`bg-white rounded-2xl border shadow-sm overflow-hidden transition-all duration-200 group ${
@@ -247,11 +284,21 @@ export default function BillsTab({ bills, currentDate, onRefresh }: Props) {
                     )}
                   </div>
 
-                  <div className="text-right flex-shrink-0">
-                    <p className={`text-sm font-bold ${bill.is_active ? 'text-gray-800' : 'text-gray-400'}`}>
+                  <div className="text-right flex-shrink-0 flex flex-col items-end gap-1.5">
+                    <button onClick={() => bill.is_active && toggleBillPayment(bill.id)}
+                      disabled={!bill.is_active}
+                      className="w-7 h-7 rounded-full border-2 flex items-center justify-center transition-all active:scale-90 disabled:opacity-30"
+                      style={paid ? { backgroundColor: '#C9F042', borderColor: '#C9F042' } : { borderColor: '#CBD5E1' }}>
+                      {paid && (
+                        <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="#0A0A0A" strokeWidth={3}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
+                        </svg>
+                      )}
+                    </button>
+                    <p className={`text-sm font-bold ${paid ? 'line-through text-gray-400' : bill.is_active ? 'text-gray-800' : 'text-gray-400'}`}>
                       {fmt(Number(bill.amount))}
                     </p>
-                    <p className="text-[10px] text-gray-400">/ mês</p>
+                    <p className="text-[10px] text-gray-400">{paid ? 'pago' : '/ mês'}</p>
                   </div>
 
                   <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 ml-1 flex-shrink-0">

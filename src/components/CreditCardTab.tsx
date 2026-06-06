@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useMemo, useEffect } from 'react'
-import type { CreditCard, CreditCardTransaction } from '@/lib/types'
+import type { CreditCard, CreditCardTransaction, Payment } from '@/lib/types'
 import CurrencyInput, { parseCurrency } from './CurrencyInput'
 
 const CARD_CATEGORIES = ['Alimentação', 'Transporte', 'Saúde', 'Educação', 'Lazer', 'Compras', 'Assinaturas', 'Outros']
@@ -52,6 +52,7 @@ interface Props {
   cards: CreditCard[]
   transactions: CreditCardTransaction[]
   currentDate: Date
+  payments: Payment[]
   onRefresh: () => void
 }
 
@@ -65,7 +66,7 @@ const defaultTxForm = () => ({
   is_recurring: false,
 })
 
-export default function CreditCardTab({ cards, transactions, currentDate, onRefresh }: Props) {
+export default function CreditCardTab({ cards, transactions, currentDate, payments, onRefresh }: Props) {
   const [selectedCardId, setSelectedCardId] = useState<string | null>(null)
   const [showCardModal, setShowCardModal] = useState(false)
   const [showTxModal, setShowTxModal] = useState(false)
@@ -98,6 +99,24 @@ export default function CreditCardTab({ cards, transactions, currentDate, onRefr
   const allCardTx = useMemo(() =>
     transactions.filter(t => t.card_id === selectedCardId),
     [transactions, selectedCardId])
+
+  function isTxPaid(txId: string) {
+    return payments.some(p => p.reference_type === 'card_tx' && p.reference_id === txId)
+  }
+
+  async function toggleTxPayment(txId: string) {
+    const existing = payments.find(p => p.reference_type === 'card_tx' && p.reference_id === txId)
+    if (existing) {
+      await fetch(`/api/payments/${existing.id}`, { method: 'DELETE' })
+    } else {
+      await fetch('/api/payments', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reference_type: 'card_tx', reference_id: txId, year, month }),
+      })
+    }
+    onRefresh()
+  }
 
   // O usuário digita o valor de cada parcela; o total é parcela × número de parcelas
   const installmentAmount = parseCurrency(txForm.installment_amount)
@@ -321,14 +340,25 @@ export default function CreditCardTab({ cards, transactions, currentDate, onRefr
                   const end = getEndDate(t)
                   const monthlyAmt = t.total_amount / t.installments
                   const catMeta = CATEGORY_META[t.category] ?? CATEGORY_META['Outros']
+                  const paid = isTxPaid(t.id)
                   return (
                     <li key={t.id} className="flex items-center gap-3 px-4 py-3.5 hover:bg-slate-50 group transition-colors">
+                      {/* Checkbox pagamento */}
+                      <button onClick={() => toggleTxPayment(t.id)}
+                        className="w-7 h-7 rounded-full border-2 flex items-center justify-center transition-all shrink-0 active:scale-90"
+                        style={paid ? { backgroundColor: '#C9F042', borderColor: '#C9F042' } : { borderColor: '#CBD5E1' }}>
+                        {paid && (
+                          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="#0A0A0A" strokeWidth={3}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
+                          </svg>
+                        )}
+                      </button>
                       <div className={`w-9 h-9 ${catMeta.bg} rounded-xl flex items-center justify-center flex-shrink-0 text-base`}>
                         {catMeta.icon}
                       </div>
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-1.5 flex-wrap">
-                          <p className="text-sm font-bold text-gray-800 truncate">{t.description}</p>
+                          <p className={`text-sm font-bold truncate ${paid ? 'line-through text-gray-400' : 'text-gray-800'}`}>{t.description}</p>
                           {t.is_recurring && (
                             <span className="inline-flex items-center gap-0.5 text-[10px] font-bold px-1.5 py-0.5 bg-indigo-100 text-indigo-700 rounded-full flex-shrink-0">
                               <svg className="w-2.5 h-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
@@ -350,7 +380,7 @@ export default function CreditCardTab({ cards, transactions, currentDate, onRefr
                         </div>
                       </div>
                       <div className="text-right flex-shrink-0">
-                        <p className="text-sm font-bold text-rose-600">-{fmt(monthlyAmt)}</p>
+                        <p className={`text-sm font-bold ${paid ? 'line-through text-gray-300' : 'text-rose-600'}`}>-{fmt(monthlyAmt)}</p>
                         {t.installments > 1 && (
                           <p className="text-[10px] text-gray-400">total {fmt(t.total_amount)}</p>
                         )}
