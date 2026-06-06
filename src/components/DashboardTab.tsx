@@ -85,10 +85,17 @@ export default function DashboardTab({ transactions, cards, cardTransactions, bi
   const today = new Date().getDate()
 
   const summary = useMemo(() => {
+    // Receita: salário config + extras + transações de receita do mês
+    const salaryIncome = salary?.fixed_amount ?? 0
     const extra = extraIncomes
       .filter(e => { const d = new Date(e.date + 'T00:00:00'); return d.getMonth() === month && d.getFullYear() === year })
       .reduce((s, e) => s + Number(e.amount), 0)
-    const totalIncome = (salary?.fixed_amount ?? 0) + extra
+    const txIncome = transactions
+      .filter(t => { const d = new Date(t.date + 'T00:00:00'); return t.type === 'income' && d.getMonth() === month && d.getFullYear() === year })
+      .reduce((s, t) => s + Number(t.amount), 0)
+    const totalIncome = salaryIncome + extra + txIncome
+
+    // Despesas
     const regularExpenses = transactions
       .filter(t => { const d = new Date(t.date + 'T00:00:00'); return t.type === 'expense' && d.getMonth() === month && d.getFullYear() === year })
       .reduce((s, t) => s + Number(t.amount), 0)
@@ -97,17 +104,32 @@ export default function DashboardTab({ transactions, cards, cardTransactions, bi
     const totalExpenses = regularExpenses + cardTotal + billsTotal
     const freeBalance = totalIncome - totalExpenses
     const pct = totalIncome > 0 ? Math.min((totalExpenses / totalIncome) * 100, 100) : 0
-    const paidBillsTotal = bills.filter(b => b.is_active && payments.some(p => p.reference_type === 'bill' && p.reference_id === b.id)).reduce((s, b) => s + Number(b.amount), 0)
-    return { totalIncome, regularExpenses, cardTotal, billsTotal, totalExpenses, freeBalance, pct, paidBillsTotal }
+
+    // Pagamentos marcados
+    const paidBillsTotal = bills
+      .filter(b => b.is_active && payments.some(p => p.reference_type === 'bill' && p.reference_id === b.id))
+      .reduce((s, b) => s + Number(b.amount), 0)
+    const paidCardTotal = cardTransactions
+      .filter(t => isActiveInMonth(t, year, month) && payments.some(p => p.reference_type === 'card_tx' && p.reference_id === t.id))
+      .reduce((s, t) => s + t.total_amount / t.installments, 0)
+    const pendingBillsTotal = billsTotal - paidBillsTotal
+    const pendingCardTotal = cardTotal - paidCardTotal
+
+    return {
+      salaryIncome, extra, txIncome, totalIncome,
+      regularExpenses, cardTotal, billsTotal, totalExpenses,
+      freeBalance, pct,
+      paidBillsTotal, paidCardTotal, pendingBillsTotal, pendingCardTotal
+    }
   }, [transactions, cardTransactions, bills, salary, extraIncomes, payments, year, month])
 
   const chartData = useMemo(() =>
     Array.from({ length: 6 }, (_, i) => {
       const d = new Date(year, month - 5 + i, 1)
       const m = d.getMonth(); const y = d.getFullYear()
-      const income = (salary?.fixed_amount ?? 0) + extraIncomes
-        .filter(e => { const ed = new Date(e.date + 'T00:00:00'); return ed.getMonth() === m && ed.getFullYear() === y })
-        .reduce((s, e) => s + Number(e.amount), 0)
+      const income = (salary?.fixed_amount ?? 0)
+        + extraIncomes.filter(e => { const ed = new Date(e.date + 'T00:00:00'); return ed.getMonth() === m && ed.getFullYear() === y }).reduce((s, e) => s + Number(e.amount), 0)
+        + transactions.filter(t => { const td = new Date(t.date + 'T00:00:00'); return t.type === 'income' && td.getMonth() === m && td.getFullYear() === y }).reduce((s, t) => s + Number(t.amount), 0)
       const expenses = transactions
         .filter(t => { const td = new Date(t.date + 'T00:00:00'); return t.type === 'expense' && td.getMonth() === m && td.getFullYear() === y })
         .reduce((s, t) => s + Number(t.amount), 0)
@@ -232,6 +254,125 @@ export default function DashboardTab({ transactions, cards, cardTransactions, bi
                 <p className="text-white font-bold text-sm leading-tight">{fmtShort(stat.value)}</p>
               </div>
             ))}
+          </div>
+        </div>
+      </div>
+
+      {/* ── EXTRATO DO MÊS ── */}
+      <div className="bg-white rounded-3xl p-5 shadow-sm">
+        <div className="flex items-center justify-between mb-4">
+          <div>
+            <h2 className="font-black text-slate-900 text-base">Extrato do mês</h2>
+            <p className="text-slate-400 text-xs mt-0.5">{MONTHS_SHORT[month]} {year} · fluxo completo</p>
+          </div>
+          {summary.totalIncome > 0 && (
+            <div className="text-right">
+              <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide">Aproveitado</p>
+              <p className="text-sm font-black" style={{ color: LIME }}>
+                {summary.totalIncome > 0 ? Math.round((1 - summary.freeBalance / summary.totalIncome) * 100) : 0}%
+              </p>
+            </div>
+          )}
+        </div>
+
+        <div className="space-y-0.5">
+          {/* Entradas */}
+          <div className="flex items-center gap-3 py-3 border-b border-slate-50">
+            <div className="w-9 h-9 rounded-2xl flex items-center justify-center shrink-0" style={{ backgroundColor: `${LIME}20` }}>
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke={LIME} strokeWidth={2.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 10.5L12 3m0 0l7.5 7.5M12 3v18" />
+              </svg>
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-bold text-slate-800">Entradas</p>
+              <p className="text-[10px] text-slate-400 mt-0.5">
+                {summary.salaryIncome > 0 && `Salário ${fmtShort(summary.salaryIncome)}`}
+                {summary.salaryIncome > 0 && (summary.txIncome + summary.extra) > 0 && ' · '}
+                {(summary.txIncome + summary.extra) > 0 && `Outros ${fmtShort(summary.txIncome + summary.extra)}`}
+                {summary.salaryIncome === 0 && summary.txIncome === 0 && summary.extra === 0 && 'Nenhuma receita lançada'}
+              </p>
+            </div>
+            <span className="text-base font-black text-emerald-600 shrink-0">+{fmt(summary.totalIncome)}</span>
+          </div>
+
+          {/* Boletos */}
+          {summary.billsTotal > 0 && (
+            <div className="flex items-center gap-3 py-3 border-b border-slate-50">
+              <div className="w-9 h-9 rounded-2xl flex items-center justify-center shrink-0 bg-amber-50">
+                <svg className="w-4 h-4 text-amber-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h3.75M9 15h3.75M9 18h3.75m3 .75H18a2.25 2.25 0 002.25-2.25V6.108c0-1.135-.845-2.098-1.976-2.192a48.424 48.424 0 00-1.123-.08m-5.801 0c-.065.21-.1.433-.1.664 0 .414.336.75.75.75h4.5a.75.75 0 00.75-.75 2.25 2.25 0 00-.1-.664m-5.8 0A2.251 2.251 0 0113.5 2.25H15c1.012 0 1.867.668 2.15 1.586m-5.8 0c-.376.023-.75.05-1.124.08C9.095 4.01 8.25 4.973 8.25 6.108V8.25m0 0H4.875c-.621 0-1.125.504-1.125 1.125v11.25c0 .621.504 1.125 1.125 1.125h9.75c.621 0 1.125-.504 1.125-1.125V9.375c0-.621-.504-1.125-1.125-1.125H8.25z" />
+                </svg>
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-bold text-slate-800">Boletos</p>
+                <div className="flex items-center gap-2 mt-0.5 flex-wrap">
+                  {summary.paidBillsTotal > 0 && (
+                    <span className="text-[10px] font-bold text-emerald-600">{fmt(summary.paidBillsTotal)} pago ✓</span>
+                  )}
+                  {summary.pendingBillsTotal > 0 && (
+                    <span className="text-[10px] font-semibold text-slate-400">{fmt(summary.pendingBillsTotal)} pendente</span>
+                  )}
+                </div>
+              </div>
+              <span className="text-base font-black text-slate-800 shrink-0">-{fmt(summary.billsTotal)}</span>
+            </div>
+          )}
+
+          {/* Cartão */}
+          {summary.cardTotal > 0 && (
+            <div className="flex items-center gap-3 py-3 border-b border-slate-50">
+              <div className="w-9 h-9 rounded-2xl flex items-center justify-center shrink-0 bg-teal-50">
+                <svg className="w-4 h-4 text-teal-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 8.25h19.5M2.25 9h19.5m-16.5 5.25h6m-6 2.25h3m-3.75 3h15a2.25 2.25 0 002.25-2.25V6.75A2.25 2.25 0 0019.5 4.5h-15a2.25 2.25 0 00-2.25 2.25v10.5A2.25 2.25 0 004.5 19.5z" />
+                </svg>
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-bold text-slate-800">Cartão (parcelas)</p>
+                <div className="flex items-center gap-2 mt-0.5 flex-wrap">
+                  {summary.paidCardTotal > 0 && (
+                    <span className="text-[10px] font-bold text-emerald-600">{fmt(summary.paidCardTotal)} pago ✓</span>
+                  )}
+                  {summary.pendingCardTotal > 0 && (
+                    <span className="text-[10px] font-semibold text-slate-400">{fmt(summary.pendingCardTotal)} pendente</span>
+                  )}
+                </div>
+              </div>
+              <span className="text-base font-black text-slate-800 shrink-0">-{fmt(summary.cardTotal)}</span>
+            </div>
+          )}
+
+          {/* Gastos avulsos */}
+          {summary.regularExpenses > 0 && (
+            <div className="flex items-center gap-3 py-3 border-b border-slate-50">
+              <div className="w-9 h-9 rounded-2xl flex items-center justify-center shrink-0 bg-rose-50">
+                <svg className="w-4 h-4 text-rose-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 3h1.386c.51 0 .955.343 1.087.835l.383 1.437M7.5 14.25a3 3 0 00-3 3h15.75m-12.75-3h11.218c1.121-2.3 2.1-4.684 2.924-7.138a60.114 60.114 0 00-16.536-1.84M7.5 14.25L5.106 5.272M6 20.25a.75.75 0 11-1.5 0 .75.75 0 011.5 0zm12.75 0a.75.75 0 11-1.5 0 .75.75 0 011.5 0z" />
+                </svg>
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-bold text-slate-800">Gastos avulsos</p>
+                <p className="text-[10px] text-slate-400 mt-0.5">Despesas lançadas no mês</p>
+              </div>
+              <span className="text-base font-black text-slate-800 shrink-0">-{fmt(summary.regularExpenses)}</span>
+            </div>
+          )}
+
+          {/* Resultado */}
+          <div className="flex items-center gap-3 pt-4">
+            <div className="w-9 h-9 rounded-2xl flex items-center justify-center shrink-0 bg-[#0A0A0A]">
+              <svg className="w-4 h-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v12m-3-2.818l.879.659c1.171.879 3.07.879 4.242 0 1.172-.879 1.172-2.303 0-3.182C13.536 12.219 12.768 12 12 12c-.725 0-1.45-.22-2.003-.659-1.106-.879-1.106-2.303 0-3.182s2.9-.879 4.006 0l.415.33M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+            </div>
+            <div className="flex-1">
+              <p className="text-base font-black text-slate-900">Saldo disponível</p>
+              <p className="text-[10px] text-slate-400 mt-0.5">
+                {summary.freeBalance >= 0 ? 'Você tem saldo positivo' : 'Gastos superam a renda'}
+              </p>
+            </div>
+            <span className={`text-xl font-black shrink-0 ${summary.freeBalance >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
+              {summary.freeBalance >= 0 ? '+' : ''}{fmt(summary.freeBalance)}
+            </span>
           </div>
         </div>
       </div>
