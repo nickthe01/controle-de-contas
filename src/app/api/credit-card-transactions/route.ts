@@ -30,6 +30,7 @@ export async function POST(request: Request) {
       installments: body.installments,
       start_date: body.start_date,
       category: body.category ?? 'Outros',
+      is_recurring: body.is_recurring ?? false,
     })
     .select()
     .single()

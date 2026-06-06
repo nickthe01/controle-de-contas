@@ -27,6 +27,7 @@ export interface CreditCardTransaction {
   installments: number
   start_date: string
   category: string
+  is_recurring: boolean
   created_at: string
 }
 
@@ -36,6 +37,7 @@ export interface Bill {
   amount: number
   due_day: number
   is_active: boolean
+  is_recurring: boolean
   created_at: string
 }
 

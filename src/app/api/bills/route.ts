@@ -28,6 +28,7 @@ export async function POST(request: Request) {
       amount: body.amount,
       due_day: body.due_day,
       is_active: true,
+      is_recurring: body.is_recurring ?? false,
     })
     .select()
     .single()

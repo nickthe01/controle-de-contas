@@ -4,8 +4,23 @@ import { useState, useMemo } from 'react'
 import type { Bill } from '@/lib/types'
 import CurrencyInput, { parseCurrency } from './CurrencyInput'
 
-function formatCurrency(value: number) {
-  return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(value)
+function fmt(v: number) {
+  return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(v)
+}
+
+function getBillMeta(name: string) {
+  const n = name.toLowerCase()
+  if (/netflix|spotify|disney|prime|hbo|globo|paramount|crunchyroll/.test(n)) return { icon: '📺', bg: 'bg-purple-100', text: 'text-purple-600', accent: 'from-purple-400 to-violet-500' }
+  if (/academia|gym|smart fit|bodytech|fitness/.test(n)) return { icon: '🏋️', bg: 'bg-orange-100', text: 'text-orange-600', accent: 'from-orange-400 to-red-400' }
+  if (/água|agua|sabesp|sanepar|cedae/.test(n)) return { icon: '💧', bg: 'bg-blue-100', text: 'text-blue-600', accent: 'from-blue-400 to-cyan-400' }
+  if (/luz|energia|enel|cpfl|cemig|light|eletro/.test(n)) return { icon: '⚡', bg: 'bg-yellow-100', text: 'text-yellow-700', accent: 'from-yellow-400 to-amber-400' }
+  if (/internet|banda larga|claro|vivo|oi|giga|fibra|net/.test(n)) return { icon: '🌐', bg: 'bg-cyan-100', text: 'text-cyan-600', accent: 'from-cyan-400 to-blue-400' }
+  if (/aluguel|condomin|iptu/.test(n)) return { icon: '🏠', bg: 'bg-emerald-100', text: 'text-emerald-600', accent: 'from-emerald-400 to-teal-400' }
+  if (/seguro/.test(n)) return { icon: '🛡️', bg: 'bg-indigo-100', text: 'text-indigo-600', accent: 'from-indigo-400 to-violet-400' }
+  if (/telefone|celular|tim|plano movel/.test(n)) return { icon: '📱', bg: 'bg-rose-100', text: 'text-rose-600', accent: 'from-rose-400 to-pink-400' }
+  if (/carnê|carne|riachuelo|renner|casas bahia|magazine/.test(n)) return { icon: '🛍️', bg: 'bg-pink-100', text: 'text-pink-600', accent: 'from-pink-400 to-rose-400' }
+  if (/gas|gás|comgás/.test(n)) return { icon: '🔥', bg: 'bg-amber-100', text: 'text-amber-700', accent: 'from-amber-400 to-orange-400' }
+  return { icon: '📄', bg: 'bg-gray-100', text: 'text-gray-500', accent: 'from-gray-300 to-gray-400' }
 }
 
 interface Props {
@@ -14,7 +29,7 @@ interface Props {
   onRefresh: () => void
 }
 
-const defaultForm = () => ({ description: '', amount: '', due_day: '' })
+const defaultForm = () => ({ description: '', amount: '', due_day: '', is_recurring: false })
 
 export default function BillsTab({ bills, currentDate, onRefresh }: Props) {
   const [showModal, setShowModal] = useState(false)
@@ -26,12 +41,19 @@ export default function BillsTab({ bills, currentDate, onRefresh }: Props) {
   const totalActive = useMemo(() => activeBills.reduce((s, b) => s + Number(b.amount), 0), [activeBills])
   const today = currentDate.getDate()
 
+  const nextBill = useMemo(() => {
+    return activeBills
+      .map(b => ({ ...b, daysUntil: b.due_day >= today ? b.due_day - today : 31 - today + b.due_day }))
+      .sort((a, b) => a.daysUntil - b.daysUntil)[0] ?? null
+  }, [activeBills, today])
+
   function getDueStatus(dueDay: number) {
-    const daysUntil = dueDay - today
-    if (daysUntil < 0) return { label: 'Vencido', bg: 'bg-rose-100', text: 'text-rose-700', dot: 'bg-rose-500' }
-    if (daysUntil === 0) return { label: 'Vence hoje', bg: 'bg-orange-100', text: 'text-orange-700', dot: 'bg-orange-500' }
-    if (daysUntil <= 5) return { label: `${daysUntil} dias`, bg: 'bg-amber-100', text: 'text-amber-700', dot: 'bg-amber-500' }
-    return { label: `Dia ${dueDay}`, bg: 'bg-gray-100', text: 'text-gray-600', dot: 'bg-gray-400' }
+    const d = dueDay - today
+    if (d < 0) return { label: 'Vencido', bg: 'bg-rose-100', text: 'text-rose-700', dot: 'bg-rose-500', urgent: true }
+    if (d === 0) return { label: 'Vence hoje', bg: 'bg-orange-100', text: 'text-orange-700', dot: 'bg-orange-500', urgent: true }
+    if (d <= 3) return { label: `${d}d restantes`, bg: 'bg-amber-100', text: 'text-amber-700', dot: 'bg-amber-500', urgent: true }
+    if (d <= 7) return { label: `${d} dias`, bg: 'bg-yellow-100', text: 'text-yellow-700', dot: 'bg-yellow-400', urgent: false }
+    return { label: `Dia ${dueDay}`, bg: 'bg-gray-100', text: 'text-gray-500', dot: 'bg-gray-300', urgent: false }
   }
 
   async function handleSubmit(e: React.FormEvent) {
@@ -45,14 +67,11 @@ export default function BillsTab({ bills, currentDate, onRefresh }: Props) {
         description: form.description,
         amount: parseCurrency(form.amount),
         due_day: parseInt(form.due_day),
+        is_recurring: form.is_recurring,
       }),
     })
     const data = await res.json()
-    if (!res.ok) {
-      setError(data.error ?? 'Erro ao salvar boleto. As tabelas foram criadas no Supabase?')
-      setSubmitting(false)
-      return
-    }
+    if (!res.ok) { setError(data.error ?? 'Erro ao salvar.'); setSubmitting(false); return }
     await onRefresh()
     setShowModal(false)
     setForm(defaultForm())
@@ -76,21 +95,42 @@ export default function BillsTab({ bills, currentDate, onRefresh }: Props) {
 
   return (
     <div className="space-y-4">
-      {/* Resumo */}
-      <div className="bg-gradient-to-br from-rose-500 to-pink-600 rounded-2xl p-5 text-white shadow-lg shadow-rose-200">
-        <p className="text-xs font-semibold uppercase tracking-widest opacity-70 mb-1">Total mensal</p>
-        <p className="text-4xl font-bold tracking-tight">{formatCurrency(totalActive)}</p>
-        <p className="text-sm opacity-60 mt-2">
-          {activeBills.length} boleto{activeBills.length !== 1 ? 's' : ''} ativo{activeBills.length !== 1 ? 's' : ''}
-          {bills.length > activeBills.length && ` · ${bills.length - activeBills.length} inativo${bills.length - activeBills.length !== 1 ? 's' : ''}`}
-        </p>
+
+      {/* ── Hero ── */}
+      <div className="bg-gradient-to-br from-amber-500 via-orange-500 to-red-500 rounded-2xl p-5 text-white shadow-lg shadow-orange-200 relative overflow-hidden">
+        <div className="absolute -right-10 -top-10 w-40 h-40 bg-white/10 rounded-full pointer-events-none" />
+        <div className="absolute right-6 top-14 w-20 h-20 bg-white/10 rounded-full pointer-events-none" />
+        <div className="relative">
+          <p className="text-xs font-semibold uppercase tracking-widest opacity-60 mb-1">Total em boletos ativos</p>
+          <p className="text-4xl font-bold tracking-tight">{fmt(totalActive)}</p>
+          <div className="mt-4 pt-4 border-t border-white/20 grid grid-cols-3 gap-3">
+            <div className="text-center">
+              <p className="text-2xl font-bold">{activeBills.length}</p>
+              <p className="text-[10px] uppercase opacity-60 mt-0.5">Ativos</p>
+            </div>
+            <div className="text-center border-x border-white/20">
+              <p className="text-2xl font-bold">{bills.filter(b => b.is_recurring).length}</p>
+              <p className="text-[10px] uppercase opacity-60 mt-0.5">Recorrentes</p>
+            </div>
+            <div className="text-center">
+              <p className="text-2xl font-bold">{nextBill ? `${nextBill.daysUntil}d` : '—'}</p>
+              <p className="text-[10px] uppercase opacity-60 mt-0.5">Próximo</p>
+            </div>
+          </div>
+        </div>
       </div>
 
-      {/* Header + botão */}
+      {/* ── Header + botão ── */}
       <div className="flex items-center justify-between">
-        <h2 className="font-bold text-gray-800 text-base">Boletos e carnês</h2>
+        <div>
+          <h2 className="font-bold text-gray-800 text-base">Boletos e carnês</h2>
+          <p className="text-xs text-gray-400 mt-0.5">
+            {bills.length} cadastrado{bills.length !== 1 ? 's' : ''}
+            {bills.length > activeBills.length ? ` · ${bills.length - activeBills.length} inativo${bills.length - activeBills.length > 1 ? 's' : ''}` : ''}
+          </p>
+        </div>
         <button onClick={() => setShowModal(true)}
-          className="flex items-center gap-1.5 bg-indigo-600 text-white text-sm font-bold px-4 py-2 rounded-xl hover:bg-indigo-700 transition-colors shadow-sm shadow-indigo-200">
+          className="flex items-center gap-1.5 bg-gradient-to-r from-amber-500 to-orange-500 text-white text-sm font-bold px-4 py-2.5 rounded-xl hover:opacity-90 transition-opacity shadow-sm shadow-orange-200">
           <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
           </svg>
@@ -98,99 +138,165 @@ export default function BillsTab({ bills, currentDate, onRefresh }: Props) {
         </button>
       </div>
 
-      <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
-        {bills.length === 0 ? (
-          <div className="py-16 text-center">
-            <div className="w-14 h-14 bg-gray-100 rounded-2xl flex items-center justify-center mx-auto mb-3">
-              <svg className="w-7 h-7 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h3.75M9 15h3.75M9 18h3.75m3 .75H18a2.25 2.25 0 002.25-2.25V6.108c0-1.135-.845-2.098-1.976-2.192a48.424 48.424 0 00-1.123-.08m-5.801 0c-.065.21-.1.433-.1.664 0 .414.336.75.75.75h4.5a.75.75 0 00.75-.75 2.25 2.25 0 00-.1-.664m-5.8 0A2.251 2.251 0 0113.5 2.25H15c1.012 0 1.867.668 2.15 1.586m-5.8 0c-.376.023-.75.05-1.124.08C9.095 4.01 8.25 4.973 8.25 6.108V8.25m0 0H4.875c-.621 0-1.125.504-1.125 1.125v11.25c0 .621.504 1.125 1.125 1.125h9.75c.621 0 1.125-.504 1.125-1.125V9.375c0-.621-.504-1.125-1.125-1.125H8.25zM6.75 12h.008v.008H6.75V12zm0 3h.008v.008H6.75V15zm0 3h.008v.008H6.75V18z" />
-              </svg>
-            </div>
-            <p className="text-gray-500 text-sm font-medium">Nenhum boleto cadastrado</p>
-            <button onClick={() => setShowModal(true)} className="mt-2 text-indigo-600 text-sm font-semibold hover:underline">
-              Adicionar boleto
-            </button>
-          </div>
-        ) : (
-          <ul className="divide-y divide-gray-50">
-            {bills.map(bill => {
-              const status = getDueStatus(bill.due_day)
-              return (
-                <li key={bill.id} className={`flex items-center gap-3 px-4 py-4 group transition-colors ${bill.is_active ? 'hover:bg-slate-50' : 'bg-gray-50/50'}`}>
+      {/* ── Lista ── */}
+      {bills.length === 0 ? (
+        <div className="bg-white rounded-2xl border border-gray-100 shadow-sm py-16 text-center">
+          <div className="w-16 h-16 bg-amber-50 rounded-2xl flex items-center justify-center mx-auto mb-3 text-3xl">📄</div>
+          <p className="text-gray-500 text-sm font-semibold">Nenhum boleto cadastrado</p>
+          <p className="text-xs text-gray-400 mt-1">Adicione contas fixas como água, luz, streaming…</p>
+          <button onClick={() => setShowModal(true)} className="mt-3 text-amber-600 text-sm font-bold hover:underline">
+            Adicionar boleto
+          </button>
+        </div>
+      ) : (
+        <div className="space-y-2.5">
+          {bills.map(bill => {
+            const meta = getBillMeta(bill.description)
+            const status = getDueStatus(bill.due_day)
+            return (
+              <div key={bill.id}
+                className={`bg-white rounded-2xl border shadow-sm overflow-hidden transition-all duration-200 group ${
+                  bill.is_active ? 'border-gray-100 hover:shadow-md hover:-translate-y-0.5' : 'border-gray-100 opacity-55'
+                }`}>
+                {/* Accent bar */}
+                <div className={`h-1 bg-gradient-to-r ${bill.is_active ? meta.accent : 'from-gray-200 to-gray-300'}`} />
+
+                <div className="flex items-center gap-3 px-4 py-3.5">
                   {/* Toggle */}
                   <button onClick={() => handleToggle(bill)}
                     className={`w-5 h-5 rounded-md border-2 flex-shrink-0 flex items-center justify-center transition-all ${
-                      bill.is_active ? 'border-indigo-600 bg-indigo-600' : 'border-gray-300 bg-white'
+                      bill.is_active ? 'border-amber-500 bg-amber-500' : 'border-gray-300 bg-white'
                     }`}>
                     {bill.is_active && (
-                      <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+                      <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3.5}>
                         <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
                       </svg>
                     )}
                   </button>
-                  <div className={`flex-1 min-w-0 ${!bill.is_active ? 'opacity-50' : ''}`}>
-                    <p className={`text-sm font-semibold text-gray-800 truncate ${!bill.is_active ? 'line-through' : ''}`}>
-                      {bill.description}
-                    </p>
-                    <span className={`inline-flex items-center gap-1 text-xs font-semibold px-2 py-0.5 rounded-full mt-1 ${status.bg} ${status.text}`}>
-                      <span className={`w-1.5 h-1.5 rounded-full ${status.dot}`} />
-                      {status.label}
-                    </span>
+
+                  {/* Icon */}
+                  <div className={`w-10 h-10 ${meta.bg} rounded-xl flex items-center justify-center flex-shrink-0 text-xl`}>
+                    {meta.icon}
                   </div>
-                  <span className={`text-sm font-bold flex-shrink-0 ${bill.is_active ? 'text-gray-800' : 'text-gray-400'}`}>
-                    {formatCurrency(Number(bill.amount))}
-                  </span>
+
+                  {/* Info */}
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <p className={`text-sm font-bold truncate ${bill.is_active ? 'text-gray-800' : 'line-through text-gray-400'}`}>
+                        {bill.description}
+                      </p>
+                      {bill.is_recurring && (
+                        <span className="inline-flex items-center gap-0.5 text-[10px] font-bold px-1.5 py-0.5 bg-indigo-100 text-indigo-700 rounded-full flex-shrink-0">
+                          <svg className="w-2.5 h-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182m0-4.991v4.99" />
+                          </svg>
+                          Recorrente
+                        </span>
+                      )}
+                    </div>
+                    <div className="mt-1">
+                      <span className={`inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full ${status.bg} ${status.text}`}>
+                        {status.urgent && <span className={`w-1.5 h-1.5 rounded-full ${status.dot} animate-pulse`} />}
+                        {status.label}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Amount */}
+                  <div className="text-right flex-shrink-0">
+                    <p className={`text-sm font-bold ${bill.is_active ? 'text-gray-800' : 'text-gray-400'}`}>
+                      {fmt(Number(bill.amount))}
+                    </p>
+                    <p className="text-[10px] text-gray-400">/ mês</p>
+                  </div>
+
+                  {/* Delete */}
                   <button onClick={() => handleDelete(bill.id)}
-                    className="w-7 h-7 rounded-lg flex items-center justify-center text-gray-300 hover:text-rose-500 hover:bg-rose-50 transition-colors opacity-0 group-hover:opacity-100 ml-1">
+                    className="w-7 h-7 rounded-lg flex items-center justify-center text-gray-300 hover:text-rose-500 hover:bg-rose-50 transition-colors opacity-0 group-hover:opacity-100 ml-1 flex-shrink-0">
                     <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                       <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
                     </svg>
                   </button>
-                </li>
-              )
-            })}
-          </ul>
-        )}
-      </div>
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      )}
 
+      {/* ── Modal ── */}
       {showModal && (
         <div className="fixed inset-0 bg-black/60 flex items-end sm:items-center justify-center z-50 p-4 backdrop-blur-sm"
           onClick={e => { if (e.target === e.currentTarget) { setShowModal(false); setError(null) } }}>
-          <div className="bg-white rounded-2xl w-full max-w-md p-6 space-y-4 shadow-2xl">
-            <div className="flex items-center justify-between">
-              <h2 className="text-lg font-bold text-gray-900">Novo boleto</h2>
+          <div className="bg-white rounded-2xl w-full max-w-md shadow-2xl overflow-hidden">
+            <div className="bg-gradient-to-r from-amber-500 to-orange-500 px-6 py-4 flex items-center justify-between">
+              <div>
+                <h2 className="text-base font-bold text-white">Novo boleto</h2>
+                <p className="text-xs text-white/70">Conta fixa, carnê ou assinatura</p>
+              </div>
               <button onClick={() => { setShowModal(false); setError(null) }}
-                className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-gray-100 text-gray-400">
-                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                className="w-8 h-8 flex items-center justify-center rounded-full bg-white/20 text-white hover:bg-white/30 transition-colors">
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
                 </svg>
               </button>
             </div>
-            {error && <p className="text-xs text-rose-600 bg-rose-50 rounded-xl px-3 py-2 font-medium">{error}</p>}
-            <form onSubmit={handleSubmit} className="space-y-3">
-              <div>
-                <label className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5 block">Descrição</label>
-                <input type="text" placeholder="Ex: Água, Carnê Riachuelo, Netflix" required value={form.description}
-                  onChange={e => setForm(f => ({ ...f, description: e.target.value }))}
-                  className="w-full border border-gray-200 rounded-xl px-3.5 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent" />
-              </div>
-              <div>
-                <label className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5 block">Valor mensal</label>
-                <CurrencyInput value={form.amount} placeholder="R$ 0,00" required
-                  onChange={v => setForm(f => ({ ...f, amount: v }))}
-                  className="w-full border border-gray-200 rounded-xl px-3.5 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent" />
-              </div>
-              <div>
-                <label className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5 block">Dia do vencimento</label>
-                <input type="number" placeholder="Ex: 10" required min="1" max="31" value={form.due_day}
-                  onChange={e => setForm(f => ({ ...f, due_day: e.target.value }))}
-                  className="w-full border border-gray-200 rounded-xl px-3.5 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent" />
-              </div>
-              <button type="submit" disabled={submitting}
-                className="w-full bg-indigo-600 text-white py-3.5 rounded-xl text-sm font-bold hover:bg-indigo-700 disabled:opacity-50 transition-colors mt-2">
-                {submitting ? 'Salvando...' : 'Salvar boleto'}
-              </button>
-            </form>
+            <div className="p-6 space-y-3">
+              {error && <p className="text-xs text-rose-600 bg-rose-50 rounded-xl px-3 py-2 font-medium">{error}</p>}
+              <form onSubmit={handleSubmit} className="space-y-3">
+                <div>
+                  <label className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5 block">Descrição</label>
+                  <input type="text" placeholder="Ex: Netflix, Água, Aluguel" required value={form.description}
+                    onChange={e => setForm(f => ({ ...f, description: e.target.value }))}
+                    className="w-full border border-gray-200 rounded-xl px-3.5 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400 focus:border-transparent" />
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5 block">Valor mensal</label>
+                    <CurrencyInput value={form.amount} placeholder="R$ 0,00" required
+                      onChange={v => setForm(f => ({ ...f, amount: v }))}
+                      className="w-full border border-gray-200 rounded-xl px-3.5 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400 focus:border-transparent" />
+                  </div>
+                  <div>
+                    <label className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5 block">Dia do vencimento</label>
+                    <input type="number" placeholder="Ex: 10" required min="1" max="31" value={form.due_day}
+                      onChange={e => setForm(f => ({ ...f, due_day: e.target.value }))}
+                      className="w-full border border-gray-200 rounded-xl px-3.5 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400 focus:border-transparent" />
+                  </div>
+                </div>
+
+                {/* Toggle de recorrência */}
+                <button type="button"
+                  onClick={() => setForm(f => ({ ...f, is_recurring: !f.is_recurring }))}
+                  className={`w-full flex items-center gap-3 p-3.5 rounded-xl border-2 transition-all text-left ${
+                    form.is_recurring ? 'border-indigo-400 bg-indigo-50' : 'border-gray-200 bg-gray-50 hover:border-gray-300'
+                  }`}>
+                  <div className={`w-5 h-5 rounded-md border-2 flex items-center justify-center flex-shrink-0 transition-all ${
+                    form.is_recurring ? 'border-indigo-600 bg-indigo-600' : 'border-gray-300'
+                  }`}>
+                    {form.is_recurring && (
+                      <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
+                      </svg>
+                    )}
+                  </div>
+                  <div className="flex-1">
+                    <p className={`text-sm font-semibold ${form.is_recurring ? 'text-indigo-700' : 'text-gray-600'}`}>
+                      Cobrança recorrente
+                    </p>
+                    <p className="text-[10px] text-gray-400">Renova automaticamente todo mês</p>
+                  </div>
+                  <svg className={`w-4 h-4 flex-shrink-0 ${form.is_recurring ? 'text-indigo-500' : 'text-gray-300'}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182m0-4.991v4.99" />
+                  </svg>
+                </button>
+
+                <button type="submit" disabled={submitting}
+                  className="w-full bg-gradient-to-r from-amber-500 to-orange-500 text-white py-3.5 rounded-xl text-sm font-bold hover:opacity-90 disabled:opacity-50 transition-opacity shadow-sm shadow-orange-200">
+                  {submitting ? 'Salvando...' : 'Salvar boleto'}
+                </button>
+              </form>
+            </div>
           </div>
         </div>
       )}
