@@ -38,6 +38,7 @@ export interface Bill {
   due_day: number
   is_active: boolean
   is_recurring: boolean
+  total_months: number | null
   created_at: string
 }
 

@@ -6,20 +6,21 @@ import DashboardTab from '@/components/DashboardTab'
 import CreditCardTab from '@/components/CreditCardTab'
 import BillsTab from '@/components/BillsTab'
 import SalaryTab from '@/components/SalaryTab'
+import ReportsTab from '@/components/ReportsTab'
 
 const MONTHS = ['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho', 'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro']
 
-type Tab = 'dashboard' | 'cartao' | 'boletos' | 'salario'
-
-function formatCurrency(value: number) {
-  return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(value)
-}
+type Tab = 'dashboard' | 'cartao' | 'boletos' | 'salario' | 'relatorios'
 
 function isActiveInMonth(t: CreditCardTransaction, year: number, month: number) {
   const start = new Date(t.start_date + 'T00:00:00')
   const startMonth = start.getFullYear() * 12 + start.getMonth()
   const targetMonth = year * 12 + month
   return targetMonth >= startMonth && targetMonth <= startMonth + t.installments - 1
+}
+
+function formatCurrency(value: number) {
+  return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(value)
 }
 
 function HomeIcon({ active }: { active: boolean }) {
@@ -54,11 +55,20 @@ function WalletIcon({ active }: { active: boolean }) {
   )
 }
 
+function ChartIcon({ active }: { active: boolean }) {
+  return (
+    <svg className="w-6 h-6" viewBox="0 0 24 24" fill={active ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth={active ? 0 : 1.5}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M3 13.125C3 12.504 3.504 12 4.125 12h2.25c.621 0 1.125.504 1.125 1.125v6.75C7.5 20.496 6.996 21 6.375 21h-2.25A1.125 1.125 0 013 19.875v-6.75zM9.75 8.625c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125v11.25c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V8.625zM16.5 4.125c0-.621.504-1.125 1.125-1.125h2.25C20.496 3 21 3.504 21 4.125v15.75c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V4.125z" />
+    </svg>
+  )
+}
+
 const TABS: { id: Tab; label: string; icon: (a: boolean) => React.ReactNode }[] = [
-  { id: 'dashboard', label: 'Início', icon: (a) => <HomeIcon active={a} /> },
-  { id: 'cartao', label: 'Cartão', icon: (a) => <CardIcon active={a} /> },
-  { id: 'boletos', label: 'Boletos', icon: (a) => <DocIcon active={a} /> },
-  { id: 'salario', label: 'Salário', icon: (a) => <WalletIcon active={a} /> },
+  { id: 'dashboard',  label: 'Início',     icon: (a) => <HomeIcon active={a} /> },
+  { id: 'cartao',     label: 'Cartão',     icon: (a) => <CardIcon active={a} /> },
+  { id: 'boletos',    label: 'Boletos',    icon: (a) => <DocIcon active={a} /> },
+  { id: 'salario',    label: 'Salário',    icon: (a) => <WalletIcon active={a} /> },
+  { id: 'relatorios', label: 'Relatórios', icon: (a) => <ChartIcon active={a} /> },
 ]
 
 export default function Home() {
@@ -103,33 +113,19 @@ export default function Home() {
     if (!salary || salary.fixed_amount <= 0) return null
     const year = currentDate.getFullYear()
     const month = currentDate.getMonth()
-
     const extraThisMonth = extraIncomes
       .filter(e => { const d = new Date(e.date + 'T00:00:00'); return d.getMonth() === month && d.getFullYear() === year })
       .reduce((s, e) => s + Number(e.amount), 0)
     const totalIncome = salary.fixed_amount + extraThisMonth
-
     const regularExpenses = transactions
       .filter(t => { const d = new Date(t.date + 'T00:00:00'); return t.type === 'expense' && d.getMonth() === month && d.getFullYear() === year })
       .reduce((s, t) => s + Number(t.amount), 0)
-    const cardTotal = cardTransactions
-      .filter(t => isActiveInMonth(t, year, month))
-      .reduce((s, t) => s + t.total_amount / t.installments, 0)
+    const cardTotal = cardTransactions.filter(t => isActiveInMonth(t, year, month)).reduce((s, t) => s + t.total_amount / t.installments, 0)
     const billsTotal = bills.filter(b => b.is_active).reduce((s, b) => s + Number(b.amount), 0)
-
     const totalExpenses = regularExpenses + cardTotal + billsTotal
     const pct = totalExpenses / totalIncome
-
-    if (pct >= 1) return {
-      level: 'danger' as const,
-      message: `Seus gastos (${formatCurrency(totalExpenses)}) superam sua renda este mês!`,
-      detail: `Cartão: ${formatCurrency(cardTotal)} · Boletos: ${formatCurrency(billsTotal)} · Despesas: ${formatCurrency(regularExpenses)}`
-    }
-    if (pct >= 0.85) return {
-      level: 'warning' as const,
-      message: `Atenção: ${Math.round(pct * 100)}% da sua renda já foi comprometida este mês.`,
-      detail: `Cartão: ${formatCurrency(cardTotal)} · Boletos: ${formatCurrency(billsTotal)} · Despesas: ${formatCurrency(regularExpenses)}`
-    }
+    if (pct >= 1) return { level: 'danger' as const, message: `Seus gastos (${formatCurrency(totalExpenses)}) superam sua renda este mês!`, detail: `Cartão: ${formatCurrency(cardTotal)} · Boletos: ${formatCurrency(billsTotal)} · Despesas: ${formatCurrency(regularExpenses)}` }
+    if (pct >= 0.85) return { level: 'warning' as const, message: `Atenção: ${Math.round(pct * 100)}% da sua renda já foi comprometida este mês.`, detail: `Cartão: ${formatCurrency(cardTotal)} · Boletos: ${formatCurrency(billsTotal)} · Despesas: ${formatCurrency(regularExpenses)}` }
     return null
   }, [salary, extraIncomes, transactions, cardTransactions, bills, currentDate])
 
@@ -137,7 +133,6 @@ export default function Home() {
     <div className="min-h-screen bg-slate-50">
       {/* Header */}
       <header className="bg-white sticky top-0 z-10 border-b border-gray-100">
-        {/* Gradient accent line */}
         <div className="h-0.5 bg-gradient-to-r from-indigo-500 via-violet-500 to-pink-500" />
         <div className="max-w-2xl mx-auto px-4 pt-3 pb-3">
           <div className="flex items-center justify-between">
@@ -152,7 +147,6 @@ export default function Home() {
                 <span className="text-[10px] text-gray-400 font-medium">Gestão financeira pessoal</span>
               </div>
             </div>
-            {/* Month nav */}
             <div className="flex items-center gap-0.5 bg-gray-100 rounded-xl p-0.5">
               <button onClick={prevMonth} className="w-7 h-7 flex items-center justify-center rounded-lg hover:bg-white transition-colors text-gray-500 hover:text-gray-700 hover:shadow-sm">
                 <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
@@ -180,12 +174,8 @@ export default function Home() {
               <span className="text-white text-xs font-bold">!</span>
             </div>
             <div>
-              <p className={`text-sm font-semibold ${alertInfo.level === 'danger' ? 'text-rose-800' : 'text-amber-800'}`}>
-                {alertInfo.message}
-              </p>
-              <p className={`text-xs mt-0.5 ${alertInfo.level === 'danger' ? 'text-rose-600' : 'text-amber-600'}`}>
-                {alertInfo.detail}
-              </p>
+              <p className={`text-sm font-semibold ${alertInfo.level === 'danger' ? 'text-rose-800' : 'text-amber-800'}`}>{alertInfo.message}</p>
+              <p className={`text-xs mt-0.5 ${alertInfo.level === 'danger' ? 'text-rose-600' : 'text-amber-600'}`}>{alertInfo.detail}</p>
             </div>
           </div>
         </div>
@@ -201,40 +191,37 @@ export default function Home() {
         ) : (
           <>
             {tab === 'dashboard' && (
-              <DashboardTab
-                transactions={transactions}
-                cards={cards}
-                cardTransactions={cardTransactions}
-                bills={bills}
-                salary={salary}
-                extraIncomes={extraIncomes}
-                currentDate={currentDate}
-                onRefresh={fetchAll}
-              />
+              <DashboardTab transactions={transactions} cards={cards} cardTransactions={cardTransactions}
+                bills={bills} salary={salary} extraIncomes={extraIncomes} currentDate={currentDate} onRefresh={fetchAll} />
             )}
-            {tab === 'cartao' && <CreditCardTab cards={cards} transactions={cardTransactions} currentDate={currentDate} onRefresh={fetchAll} />}
-            {tab === 'boletos' && <BillsTab bills={bills} currentDate={currentDate} onRefresh={fetchAll} />}
-            {tab === 'salario' && <SalaryTab salary={salary} extraIncomes={extraIncomes} currentDate={currentDate} onRefresh={fetchAll} />}
+            {tab === 'cartao' && (
+              <CreditCardTab cards={cards} transactions={cardTransactions} currentDate={currentDate} onRefresh={fetchAll} />
+            )}
+            {tab === 'boletos' && (
+              <BillsTab bills={bills} currentDate={currentDate} onRefresh={fetchAll} />
+            )}
+            {tab === 'salario' && (
+              <SalaryTab salary={salary} extraIncomes={extraIncomes} currentDate={currentDate} onRefresh={fetchAll} />
+            )}
+            {tab === 'relatorios' && (
+              <ReportsTab transactions={transactions} cards={cards} cardTransactions={cardTransactions}
+                bills={bills} salary={salary} extraIncomes={extraIncomes} currentDate={currentDate} />
+            )}
           </>
         )}
       </main>
 
       {/* Bottom navigation */}
       <nav className="fixed bottom-0 left-0 right-0 bg-white/95 backdrop-blur-md border-t border-gray-100 z-20 safe-area-bottom shadow-lg shadow-black/5">
-        <div className="max-w-2xl mx-auto flex px-3 py-2">
+        <div className="max-w-2xl mx-auto flex px-2 py-2">
           {TABS.map(t => (
-            <button
-              key={t.id}
-              onClick={() => setTab(t.id)}
+            <button key={t.id} onClick={() => setTab(t.id)}
               className={`flex-1 flex flex-col items-center gap-1 py-1.5 rounded-2xl transition-all duration-200 relative ${
                 tab === t.id ? 'text-indigo-600' : 'text-gray-400 hover:text-gray-500'
-              }`}
-            >
-              {tab === t.id && (
-                <span className="absolute inset-0 bg-indigo-50 rounded-2xl" />
-              )}
+              }`}>
+              {tab === t.id && <span className="absolute inset-0 bg-indigo-50 rounded-2xl" />}
               <span className="relative">{t.icon(tab === t.id)}</span>
-              <span className={`text-[10px] font-bold tracking-wide relative ${tab === t.id ? 'text-indigo-600' : 'text-gray-400'}`}>
+              <span className={`text-[9px] font-bold tracking-wide relative ${tab === t.id ? 'text-indigo-600' : 'text-gray-400'}`}>
                 {t.label}
               </span>
             </button>

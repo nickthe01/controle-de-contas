@@ -18,6 +18,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
   if ('amount' in body) updates.amount = body.amount
   if ('due_day' in body) updates.due_day = body.due_day
   if ('is_recurring' in body) updates.is_recurring = body.is_recurring
+  if ('total_months' in body) updates.total_months = body.total_months
 
   const { data, error } = await getClient()
     .from('bills')

@@ -29,6 +29,7 @@ export async function POST(request: Request) {
       due_day: body.due_day,
       is_active: true,
       is_recurring: body.is_recurring ?? false,
+      total_months: body.total_months ?? null,
     })
     .select()
     .single()

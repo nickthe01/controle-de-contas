@@ -4,6 +4,8 @@ import { useState, useMemo } from 'react'
 import type { Bill } from '@/lib/types'
 import CurrencyInput, { parseCurrency } from './CurrencyInput'
 
+const MONTHS_SHORT = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez']
+
 function fmt(v: number) {
   return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(v)
 }
@@ -17,10 +19,21 @@ function getBillMeta(name: string) {
   if (/internet|banda larga|claro|vivo|oi|giga|fibra|net/.test(n)) return { icon: '🌐', bg: 'bg-cyan-100', text: 'text-cyan-600', accent: 'from-cyan-400 to-blue-400' }
   if (/aluguel|condomin|iptu/.test(n)) return { icon: '🏠', bg: 'bg-emerald-100', text: 'text-emerald-600', accent: 'from-emerald-400 to-teal-400' }
   if (/seguro/.test(n)) return { icon: '🛡️', bg: 'bg-indigo-100', text: 'text-indigo-600', accent: 'from-indigo-400 to-violet-400' }
-  if (/telefone|celular|tim|plano movel/.test(n)) return { icon: '📱', bg: 'bg-rose-100', text: 'text-rose-600', accent: 'from-rose-400 to-pink-400' }
+  if (/telefone|celular|tim|plano/.test(n)) return { icon: '📱', bg: 'bg-rose-100', text: 'text-rose-600', accent: 'from-rose-400 to-pink-400' }
   if (/carnê|carne|riachuelo|renner|casas bahia|magazine/.test(n)) return { icon: '🛍️', bg: 'bg-pink-100', text: 'text-pink-600', accent: 'from-pink-400 to-rose-400' }
   if (/gas|gás|comgás/.test(n)) return { icon: '🔥', bg: 'bg-amber-100', text: 'text-amber-700', accent: 'from-amber-400 to-orange-400' }
   return { icon: '📄', bg: 'bg-gray-100', text: 'text-gray-500', accent: 'from-gray-300 to-gray-400' }
+}
+
+function getBillProgress(bill: Bill, currentDate: Date) {
+  if (!bill.total_months) return null
+  const created = new Date(bill.created_at)
+  const startM = created.getFullYear() * 12 + created.getMonth()
+  const nowM = currentDate.getFullYear() * 12 + currentDate.getMonth()
+  const currentMonth = Math.max(nowM - startM + 1, 1)
+  const pct = Math.min((currentMonth / bill.total_months) * 100, 100)
+  const endDate = new Date(created.getFullYear(), created.getMonth() + bill.total_months - 1, 1)
+  return { currentMonth: Math.min(currentMonth, bill.total_months), total: bill.total_months, pct, endDate }
 }
 
 interface Props {
@@ -29,7 +42,7 @@ interface Props {
   onRefresh: () => void
 }
 
-const defaultForm = () => ({ description: '', amount: '', due_day: '', is_recurring: false })
+const defaultForm = () => ({ description: '', amount: '', due_day: '', is_recurring: false, total_months: '' })
 
 export default function BillsTab({ bills, currentDate, onRefresh }: Props) {
   const [showModal, setShowModal] = useState(false)
@@ -71,6 +84,7 @@ export default function BillsTab({ bills, currentDate, onRefresh }: Props) {
       amount: fmt(Number(bill.amount)).replace('R$ ', '').replace('R$ ', ''),
       due_day: String(bill.due_day),
       is_recurring: bill.is_recurring,
+      total_months: bill.total_months ? String(bill.total_months) : '',
     })
     setError(null)
     setShowModal(true)
@@ -85,24 +99,17 @@ export default function BillsTab({ bills, currentDate, onRefresh }: Props) {
       amount: parseCurrency(form.amount),
       due_day: parseInt(form.due_day),
       is_recurring: form.is_recurring,
+      total_months: form.total_months ? parseInt(form.total_months) : null,
     }
 
     if (editingBill) {
-      const res = await fetch(`/api/bills/${editingBill.id}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      })
+      const res = await fetch(`/api/bills/${editingBill.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) })
       const data = await res.json()
-      if (!res.ok) { setError(data.error ?? 'Erro ao editar boleto.'); setSubmitting(false); return }
+      if (!res.ok) { setError(data.error ?? 'Erro ao editar.'); setSubmitting(false); return }
     } else {
-      const res = await fetch('/api/bills', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      })
+      const res = await fetch('/api/bills', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) })
       const data = await res.json()
-      if (!res.ok) { setError(data.error ?? 'Erro ao salvar boleto.'); setSubmitting(false); return }
+      if (!res.ok) { setError(data.error ?? 'Erro ao salvar.'); setSubmitting(false); return }
     }
 
     await onRefresh()
@@ -113,11 +120,7 @@ export default function BillsTab({ bills, currentDate, onRefresh }: Props) {
   }
 
   async function handleToggle(bill: Bill) {
-    await fetch(`/api/bills/${bill.id}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ is_active: !bill.is_active }),
-    })
+    await fetch(`/api/bills/${bill.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ is_active: !bill.is_active }) })
     onRefresh()
   }
 
@@ -185,6 +188,7 @@ export default function BillsTab({ bills, currentDate, onRefresh }: Props) {
           {bills.map(bill => {
             const meta = getBillMeta(bill.description)
             const status = getDueStatus(bill.due_day)
+            const progress = getBillProgress(bill, currentDate)
             return (
               <div key={bill.id}
                 className={`bg-white rounded-2xl border shadow-sm overflow-hidden transition-all duration-200 group ${
@@ -202,9 +206,11 @@ export default function BillsTab({ bills, currentDate, onRefresh }: Props) {
                       </svg>
                     )}
                   </button>
+
                   <div className={`w-10 h-10 ${meta.bg} rounded-xl flex items-center justify-center flex-shrink-0 text-xl`}>
                     {meta.icon}
                   </div>
+
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-1.5 flex-wrap">
                       <p className={`text-sm font-bold truncate ${bill.is_active ? 'text-gray-800' : 'line-through text-gray-400'}`}>
@@ -219,19 +225,35 @@ export default function BillsTab({ bills, currentDate, onRefresh }: Props) {
                         </span>
                       )}
                     </div>
-                    <div className="mt-1">
+
+                    <div className="flex items-center gap-1.5 mt-1 flex-wrap">
                       <span className={`inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full ${status.bg} ${status.text}`}>
                         {status.urgent && <span className={`w-1.5 h-1.5 rounded-full ${status.dot} animate-pulse`} />}
                         {status.label}
                       </span>
+                      {progress && (
+                        <span className="text-[10px] text-gray-400 font-medium">
+                          Mês {progress.currentMonth}/{progress.total} · até {MONTHS_SHORT[progress.endDate.getMonth()]}/{progress.endDate.getFullYear()}
+                        </span>
+                      )}
                     </div>
+
+                    {/* Barra de progresso para carnês */}
+                    {progress && (
+                      <div className="mt-1.5 h-1 bg-gray-100 rounded-full overflow-hidden w-full max-w-[140px]">
+                        <div className={`h-full bg-gradient-to-r ${meta.accent} rounded-full transition-all`}
+                          style={{ width: `${progress.pct}%` }} />
+                      </div>
+                    )}
                   </div>
+
                   <div className="text-right flex-shrink-0">
                     <p className={`text-sm font-bold ${bill.is_active ? 'text-gray-800' : 'text-gray-400'}`}>
                       {fmt(Number(bill.amount))}
                     </p>
                     <p className="text-[10px] text-gray-400">/ mês</p>
                   </div>
+
                   <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 ml-1 flex-shrink-0">
                     <button onClick={() => openEdit(bill)}
                       className="w-7 h-7 rounded-lg flex items-center justify-center text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 transition-colors">
@@ -275,10 +297,11 @@ export default function BillsTab({ bills, currentDate, onRefresh }: Props) {
               <form onSubmit={handleSubmit} className="space-y-3">
                 <div>
                   <label className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5 block">Descrição</label>
-                  <input type="text" placeholder="Ex: Netflix, Água, Aluguel" required value={form.description}
+                  <input type="text" placeholder="Ex: Netflix, Água, Carnê Riachuelo" required value={form.description}
                     onChange={e => setForm(f => ({ ...f, description: e.target.value }))}
                     className="w-full border border-gray-200 rounded-xl px-3.5 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400 focus:border-transparent" />
                 </div>
+
                 <div className="grid grid-cols-2 gap-3">
                   <div>
                     <label className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5 block">Valor mensal</label>
@@ -293,6 +316,22 @@ export default function BillsTab({ bills, currentDate, onRefresh }: Props) {
                       className="w-full border border-gray-200 rounded-xl px-3.5 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400 focus:border-transparent" />
                   </div>
                 </div>
+
+                <div>
+                  <label className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5 block">
+                    Número de meses <span className="text-gray-400 normal-case font-normal">(deixe em branco se for indefinido)</span>
+                  </label>
+                  <input type="number" placeholder="Ex: 12 meses" min="1" max="360" value={form.total_months}
+                    onChange={e => setForm(f => ({ ...f, total_months: e.target.value }))}
+                    className="w-full border border-gray-200 rounded-xl px-3.5 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400 focus:border-transparent" />
+                  {form.total_months && parseInt(form.total_months) > 0 && form.amount && (
+                    <p className="text-xs text-amber-700 bg-amber-50 rounded-lg px-3 py-2 mt-1.5 font-medium">
+                      Total do carnê: {fmt(parseCurrency(form.amount) * parseInt(form.total_months))} em {form.total_months} meses
+                    </p>
+                  )}
+                </div>
+
+                {/* Toggle de recorrência */}
                 <button type="button"
                   onClick={() => setForm(f => ({ ...f, is_recurring: !f.is_recurring }))}
                   className={`w-full flex items-center gap-3 p-3.5 rounded-xl border-2 transition-all text-left ${
@@ -315,6 +354,7 @@ export default function BillsTab({ bills, currentDate, onRefresh }: Props) {
                     <path strokeLinecap="round" strokeLinejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182m0-4.991v4.99" />
                   </svg>
                 </button>
+
                 <button type="submit" disabled={submitting}
                   className="w-full bg-gradient-to-r from-amber-500 to-orange-500 text-white py-3.5 rounded-xl text-sm font-bold hover:opacity-90 disabled:opacity-50 transition-opacity shadow-sm shadow-orange-200">
                   {submitting ? 'Salvando...' : editingBill ? 'Salvar alterações' : 'Salvar boleto'}
