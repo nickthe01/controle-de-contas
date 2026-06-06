@@ -58,7 +58,7 @@ interface Props {
 const defaultCardForm = () => ({ name: '', limit_amount: '', closing_day: '', due_day: '' })
 const defaultTxForm = () => ({
   description: '',
-  total_amount: '',
+  installment_amount: '',  // valor POR parcela — o total é calculado na hora do submit
   installments: '1',
   start_date: new Date().toISOString().split('T')[0],
   category: 'Outros',
@@ -69,6 +69,7 @@ export default function CreditCardTab({ cards, transactions, currentDate, onRefr
   const [selectedCardId, setSelectedCardId] = useState<string | null>(null)
   const [showCardModal, setShowCardModal] = useState(false)
   const [showTxModal, setShowTxModal] = useState(false)
+  const [editingTx, setEditingTx] = useState<CreditCardTransaction | null>(null)
   const [cardForm, setCardForm] = useState(defaultCardForm())
   const [txForm, setTxForm] = useState(defaultTxForm())
   const [submitting, setSubmitting] = useState(false)
@@ -98,9 +99,9 @@ export default function CreditCardTab({ cards, transactions, currentDate, onRefr
     transactions.filter(t => t.card_id === selectedCardId),
     [transactions, selectedCardId])
 
-  const installmentAmount = txForm.total_amount && parseInt(txForm.installments) > 0
-    ? parseCurrency(txForm.total_amount) / parseInt(txForm.installments)
-    : 0
+  // O usuário digita o valor de cada parcela; o total é parcela × número de parcelas
+  const installmentAmount = parseCurrency(txForm.installment_amount)
+  const totalAmount = installmentAmount * (parseInt(txForm.installments) || 1)
 
   async function handleAddCard(e: React.FormEvent) {
     e.preventDefault()
@@ -125,28 +126,64 @@ export default function CreditCardTab({ cards, transactions, currentDate, onRefr
     setSubmitting(false)
   }
 
+  function openCreateTx() {
+    setEditingTx(null)
+    setTxForm(defaultTxForm())
+    setError(null)
+    setShowTxModal(true)
+  }
+
+  function openEditTx(tx: CreditCardTransaction) {
+    setEditingTx(tx)
+    const perInstallment = tx.total_amount / tx.installments
+    setTxForm({
+      description: tx.description,
+      installment_amount: new Intl.NumberFormat('pt-BR', { minimumFractionDigits: 2 }).format(perInstallment),
+      installments: String(tx.installments),
+      start_date: tx.start_date,
+      category: tx.category,
+      is_recurring: tx.is_recurring,
+    })
+    setError(null)
+    setShowTxModal(true)
+  }
+
   async function handleAddTx(e: React.FormEvent) {
     e.preventDefault()
     setSubmitting(true)
     setError(null)
-    const res = await fetch('/api/credit-card-transactions', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        card_id: selectedCardId,
-        description: txForm.description,
-        total_amount: parseCurrency(txForm.total_amount),
-        installments: parseInt(txForm.installments),
-        start_date: txForm.start_date,
-        category: txForm.category,
-        is_recurring: txForm.is_recurring,
-      }),
-    })
-    const data = await res.json()
-    if (!res.ok) { setError(data.error ?? 'Erro ao salvar lançamento.'); setSubmitting(false); return }
+    const payload = {
+      card_id: selectedCardId,
+      description: txForm.description,
+      total_amount: totalAmount,
+      installments: parseInt(txForm.installments),
+      start_date: txForm.start_date,
+      category: txForm.category,
+      is_recurring: txForm.is_recurring,
+    }
+
+    if (editingTx) {
+      const res = await fetch(`/api/credit-card-transactions/${editingTx.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      })
+      const data = await res.json()
+      if (!res.ok) { setError(data.error ?? 'Erro ao editar lançamento.'); setSubmitting(false); return }
+    } else {
+      const res = await fetch('/api/credit-card-transactions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      })
+      const data = await res.json()
+      if (!res.ok) { setError(data.error ?? 'Erro ao salvar lançamento.'); setSubmitting(false); return }
+    }
+
     await onRefresh()
     setShowTxModal(false)
     setTxForm(defaultTxForm())
+    setEditingTx(null)
     setSubmitting(false)
   }
 
@@ -261,7 +298,7 @@ export default function CreditCardTab({ cards, transactions, currentDate, onRefr
                 <h2 className="font-bold text-gray-800 text-sm">Lançamentos do mês</h2>
                 <p className="text-xs text-gray-400 mt-0.5">{currentMonthTx.length} item{currentMonthTx.length !== 1 ? 's' : ''}</p>
               </div>
-              <button onClick={() => setShowTxModal(true)}
+              <button onClick={openCreateTx}
                 className="flex items-center gap-1 text-xs font-bold bg-indigo-50 text-indigo-600 hover:bg-indigo-100 px-3 py-2 rounded-xl transition-colors">
                 <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
@@ -318,12 +355,20 @@ export default function CreditCardTab({ cards, transactions, currentDate, onRefr
                           <p className="text-[10px] text-gray-400">total {fmt(t.total_amount)}</p>
                         )}
                       </div>
-                      <button onClick={() => handleDeleteTx(t.id)}
-                        className="w-7 h-7 rounded-lg flex items-center justify-center text-gray-300 hover:text-rose-500 hover:bg-rose-50 transition-colors opacity-0 group-hover:opacity-100 ml-1 flex-shrink-0">
-                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-                        </svg>
-                      </button>
+                      <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 ml-1 flex-shrink-0">
+                        <button onClick={() => openEditTx(t)}
+                          className="w-7 h-7 rounded-lg flex items-center justify-center text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 transition-colors">
+                          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zm0 0L19.5 7.125" />
+                          </svg>
+                        </button>
+                        <button onClick={() => handleDeleteTx(t.id)}
+                          className="w-7 h-7 rounded-lg flex items-center justify-center text-gray-300 hover:text-rose-500 hover:bg-rose-50 transition-colors">
+                          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                          </svg>
+                        </button>
+                      </div>
                     </li>
                   )
                 })}
@@ -424,14 +469,14 @@ export default function CreditCardTab({ cards, transactions, currentDate, onRefr
       {/* ── Modal: novo lançamento ── */}
       {showTxModal && (
         <div className="fixed inset-0 bg-black/60 flex items-end sm:items-center justify-center z-50 p-4 backdrop-blur-sm"
-          onClick={e => { if (e.target === e.currentTarget) { setShowTxModal(false); setError(null) } }}>
+          onClick={e => { if (e.target === e.currentTarget) { setShowTxModal(false); setEditingTx(null); setError(null) } }}>
           <div className="bg-white rounded-2xl w-full max-w-md shadow-2xl overflow-hidden">
-            <div className="bg-gradient-to-r from-rose-500 to-pink-600 px-6 py-4 flex items-center justify-between">
+            <div className={`px-6 py-4 flex items-center justify-between ${editingTx ? 'bg-gradient-to-r from-slate-700 to-slate-800' : 'bg-gradient-to-r from-rose-500 to-pink-600'}`}>
               <div>
-                <h2 className="text-base font-bold text-white">Novo lançamento</h2>
-                <p className="text-xs text-white/70">{selectedCard?.name}</p>
+                <h2 className="text-base font-bold text-white">{editingTx ? 'Editar lançamento' : 'Novo lançamento'}</h2>
+                <p className="text-xs text-white/70">{editingTx ? editingTx.description : selectedCard?.name}</p>
               </div>
-              <button onClick={() => { setShowTxModal(false); setError(null) }}
+              <button onClick={() => { setShowTxModal(false); setEditingTx(null); setError(null) }}
                 className="w-8 h-8 flex items-center justify-center rounded-full bg-white/20 text-white hover:bg-white/30">
                 <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
@@ -448,9 +493,9 @@ export default function CreditCardTab({ cards, transactions, currentDate, onRefr
                     className="w-full border border-gray-200 rounded-xl px-3.5 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-rose-400 focus:border-transparent" />
                 </div>
                 <div>
-                  <label className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5 block">Valor total</label>
-                  <CurrencyInput value={txForm.total_amount} placeholder="R$ 0,00" required
-                    onChange={v => setTxForm(f => ({ ...f, total_amount: v }))}
+                  <label className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5 block">Valor da parcela</label>
+                  <CurrencyInput value={txForm.installment_amount} placeholder="R$ 0,00" required
+                    onChange={v => setTxForm(f => ({ ...f, installment_amount: v }))}
                     className="w-full border border-gray-200 rounded-xl px-3.5 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-rose-400 focus:border-transparent" />
                 </div>
                 <div className="grid grid-cols-2 gap-3">
@@ -468,7 +513,7 @@ export default function CreditCardTab({ cards, transactions, currentDate, onRefr
                   </div>
                 </div>
 
-                {installmentAmount > 0 && parseInt(txForm.installments) > 1 && (
+                {installmentAmount > 0 && (
                   <div className="flex items-center gap-2 bg-rose-50 border border-rose-100 rounded-xl px-3.5 py-2.5">
                     <div className="w-6 h-6 bg-rose-100 rounded-lg flex items-center justify-center flex-shrink-0">
                       <svg className="w-3.5 h-3.5 text-rose-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -476,7 +521,7 @@ export default function CreditCardTab({ cards, transactions, currentDate, onRefr
                       </svg>
                     </div>
                     <p className="text-xs text-rose-700 font-bold">
-                      {txForm.installments}× de {fmt(installmentAmount)} por mês
+                      {txForm.installments}× de {fmt(installmentAmount)} = {fmt(totalAmount)} no total
                     </p>
                   </div>
                 )}
@@ -530,7 +575,7 @@ export default function CreditCardTab({ cards, transactions, currentDate, onRefr
 
                 <button type="submit" disabled={submitting}
                   className="w-full bg-gradient-to-r from-rose-500 to-pink-600 text-white py-3.5 rounded-xl text-sm font-bold hover:opacity-90 disabled:opacity-50 transition-opacity shadow-sm shadow-rose-200">
-                  {submitting ? 'Salvando...' : 'Salvar lançamento'}
+                  {submitting ? 'Salvando...' : editingTx ? 'Salvar alterações' : 'Salvar lançamento'}
                 </button>
               </form>
             </div>

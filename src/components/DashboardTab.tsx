@@ -31,11 +31,7 @@ function isActiveInMonth(t: CreditCardTransaction, year: number, month: number) 
   return targetMonth >= startMonth && targetMonth <= startMonth + t.installments - 1
 }
 
-interface BarChartData {
-  month: string
-  income: number
-  expense: number
-}
+interface BarChartData { month: string; income: number; expense: number }
 
 function BarChart({ data }: { data: BarChartData[] }) {
   const maxVal = Math.max(...data.flatMap(d => [d.income, d.expense]), 1)
@@ -44,14 +40,10 @@ function BarChart({ data }: { data: BarChartData[] }) {
       {data.map((d, i) => (
         <div key={i} className="flex-1 flex flex-col items-center gap-1">
           <div className="w-full flex gap-0.5 items-end" style={{ height: '88px' }}>
-            <div
-              className="flex-1 bg-emerald-400 rounded-t-sm transition-all min-h-[2px]"
-              style={{ height: `${Math.max((d.income / maxVal) * 100, 2)}%` }}
-            />
-            <div
-              className="flex-1 bg-rose-400 rounded-t-sm transition-all min-h-[2px]"
-              style={{ height: `${Math.max((d.expense / maxVal) * 100, 2)}%` }}
-            />
+            <div className="flex-1 bg-emerald-400 rounded-t-sm transition-all min-h-[2px]"
+              style={{ height: `${Math.max((d.income / maxVal) * 100, 2)}%` }} />
+            <div className="flex-1 bg-rose-400 rounded-t-sm transition-all min-h-[2px]"
+              style={{ height: `${Math.max((d.expense / maxVal) * 100, 2)}%` }} />
           </div>
           <span className="text-[9px] text-gray-400 font-medium leading-none">{d.month}</span>
         </div>
@@ -81,6 +73,7 @@ const defaultForm = () => ({
 
 export default function DashboardTab({ transactions, cards, cardTransactions, bills, salary, extraIncomes, currentDate, onRefresh }: Props) {
   const [showModal, setShowModal] = useState(false)
+  const [editingTx, setEditingTx] = useState<Transaction | null>(null)
   const [form, setForm] = useState(defaultForm())
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -89,36 +82,24 @@ export default function DashboardTab({ transactions, cards, cardTransactions, bi
   const month = currentDate.getMonth()
   const today = new Date().getDate()
 
-  // Cálculos do mês atual cruzando todas as fontes
   const summary = useMemo(() => {
     const extraThisMonth = extraIncomes
       .filter(e => { const d = new Date(e.date + 'T00:00:00'); return d.getMonth() === month && d.getFullYear() === year })
       .reduce((s, e) => s + Number(e.amount), 0)
-
     const totalIncome = (salary?.fixed_amount ?? 0) + extraThisMonth
-
     const regularExpenses = transactions
       .filter(t => { const d = new Date(t.date + 'T00:00:00'); return t.type === 'expense' && d.getMonth() === month && d.getFullYear() === year })
       .reduce((s, t) => s + Number(t.amount), 0)
-
-    const regularIncome = transactions
-      .filter(t => { const d = new Date(t.date + 'T00:00:00'); return t.type === 'income' && d.getMonth() === month && d.getFullYear() === year })
-      .reduce((s, t) => s + Number(t.amount), 0)
-
     const cardTotal = cardTransactions
       .filter(t => isActiveInMonth(t, year, month))
       .reduce((s, t) => s + t.total_amount / t.installments, 0)
-
     const billsTotal = bills.filter(b => b.is_active).reduce((s, b) => s + Number(b.amount), 0)
-
     const totalExpenses = regularExpenses + cardTotal + billsTotal
     const freeBalance = totalIncome - totalExpenses
     const pct = totalIncome > 0 ? Math.min((totalExpenses / totalIncome) * 100, 100) : 0
-
-    return { totalIncome, extraThisMonth, regularExpenses, regularIncome, cardTotal, billsTotal, totalExpenses, freeBalance, pct }
+    return { totalIncome, extraThisMonth, regularExpenses, cardTotal, billsTotal, totalExpenses, freeBalance, pct }
   }, [transactions, cardTransactions, bills, salary, extraIncomes, year, month])
 
-  // Últimas transações do mês
   const recentTransactions = useMemo(() =>
     transactions
       .filter(t => { const d = new Date(t.date + 'T00:00:00'); return d.getMonth() === month && d.getFullYear() === year })
@@ -126,72 +107,78 @@ export default function DashboardTab({ transactions, cards, cardTransactions, bi
       .slice(0, 5),
     [transactions, year, month])
 
-  // Gráfico: últimos 6 meses
-  const chartData: BarChartData[] = useMemo(() => {
-    return Array.from({ length: 6 }, (_, i) => {
+  const chartData: BarChartData[] = useMemo(() =>
+    Array.from({ length: 6 }, (_, i) => {
       const d = new Date(year, month - 5 + i, 1)
-      const m = d.getMonth()
-      const y = d.getFullYear()
-      const monthTx = transactions.filter(t => {
-        const td = new Date(t.date + 'T00:00:00')
-        return td.getMonth() === m && td.getFullYear() === y
-      })
+      const m = d.getMonth(); const y = d.getFullYear()
+      const monthTx = transactions.filter(t => { const td = new Date(t.date + 'T00:00:00'); return td.getMonth() === m && td.getFullYear() === y })
       return {
         month: MONTHS_SHORT[m],
         income: monthTx.filter(t => t.type === 'income').reduce((s, t) => s + Number(t.amount), 0),
         expense: monthTx.filter(t => t.type === 'expense').reduce((s, t) => s + Number(t.amount), 0),
       }
-    })
-  }, [transactions, year, month])
+    }), [transactions, year, month])
 
-  // Boletos urgentes (próximos do vencimento)
-  const urgentBills = useMemo(() => {
-    return bills
-      .filter(b => b.is_active)
+  const urgentBills = useMemo(() =>
+    bills.filter(b => b.is_active)
       .map(b => ({ ...b, daysUntil: b.due_day >= today ? b.due_day - today : 31 - today + b.due_day }))
       .sort((a, b) => a.daysUntil - b.daysUntil)
-      .slice(0, 3)
-  }, [bills, today])
+      .slice(0, 3),
+    [bills, today])
 
-  // Estimativa próximos 4 meses
-  const forecast = useMemo(() => {
-    return Array.from({ length: 4 }, (_, i) => {
+  const forecast = useMemo(() =>
+    Array.from({ length: 4 }, (_, i) => {
       const d = new Date(year, month + i + 1, 1)
-      const fm = d.getMonth()
-      const fy = d.getFullYear()
-      const projectedCard = cardTransactions
-        .filter(t => isActiveInMonth(t, fy, fm))
-        .reduce((s, t) => s + t.total_amount / t.installments, 0)
+      const fm = d.getMonth(); const fy = d.getFullYear()
+      const projectedCard = cardTransactions.filter(t => isActiveInMonth(t, fy, fm)).reduce((s, t) => s + t.total_amount / t.installments, 0)
       const projectedBills = bills.filter(b => b.is_active).reduce((s, b) => s + Number(b.amount), 0)
       const projectedIncome = salary?.fixed_amount ?? 0
-      const projectedExpenses = projectedCard + projectedBills
-      return {
-        label: `${MONTHS_SHORT[fm]}/${fy}`,
-        income: projectedIncome,
-        expenses: projectedExpenses,
-        balance: projectedIncome - projectedExpenses,
-      }
-    }).filter(f => f.income > 0 || f.expenses > 0)
-  }, [cardTransactions, bills, salary, year, month])
+      return { label: `${MONTHS_SHORT[fm]}/${fy}`, income: projectedIncome, expenses: projectedCard + projectedBills, balance: projectedIncome - projectedCard - projectedBills }
+    }).filter(f => f.income > 0 || f.expenses > 0),
+    [cardTransactions, bills, salary, year, month])
+
+  function openCreate() {
+    setEditingTx(null)
+    setForm(defaultForm())
+    setError(null)
+    setShowModal(true)
+  }
+
+  function openEdit(tx: Transaction) {
+    setEditingTx(tx)
+    setForm({ description: tx.description, amount: fmt(Number(tx.amount)).replace('R$ ', '').replace('R$ ', ''), type: tx.type, category: tx.category, date: tx.date })
+    setError(null)
+    setShowModal(true)
+  }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     setSubmitting(true)
     setError(null)
-    const res = await fetch('/api/transactions', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ...form, amount: parseCurrency(form.amount) }),
-    })
-    const data = await res.json()
-    if (!res.ok) {
-      setError(data.error ?? 'Erro ao salvar transação.')
-      setSubmitting(false)
-      return
+    const payload = { ...form, amount: parseCurrency(form.amount) }
+
+    if (editingTx) {
+      const res = await fetch(`/api/transactions/${editingTx.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      })
+      const data = await res.json()
+      if (!res.ok) { setError(data.error ?? 'Erro ao editar transação.'); setSubmitting(false); return }
+    } else {
+      const res = await fetch('/api/transactions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      })
+      const data = await res.json()
+      if (!res.ok) { setError(data.error ?? 'Erro ao salvar transação.'); setSubmitting(false); return }
     }
+
     await onRefresh()
     setShowModal(false)
     setForm(defaultForm())
+    setEditingTx(null)
     setSubmitting(false)
   }
 
@@ -203,39 +190,30 @@ export default function DashboardTab({ transactions, cards, cardTransactions, bi
 
   const balanceColor = summary.freeBalance >= 0 ? 'text-emerald-300' : 'text-rose-300'
   const pctColor = summary.pct >= 100 ? 'bg-rose-500' : summary.pct >= 85 ? 'bg-amber-500' : 'bg-emerald-400'
+  const categories = form.type === 'income' ? INCOME_CATEGORIES : EXPENSE_CATEGORIES
 
   function getBillStatus(daysUntil: number) {
     if (daysUntil <= 0) return { label: 'Vencido', bg: 'bg-rose-100', text: 'text-rose-700' }
-    if (daysUntil === 0) return { label: 'Hoje', bg: 'bg-orange-100', text: 'text-orange-700' }
     if (daysUntil <= 5) return { label: `${daysUntil}d`, bg: 'bg-amber-100', text: 'text-amber-700' }
     return { label: `${daysUntil}d`, bg: 'bg-gray-100', text: 'text-gray-500' }
   }
 
-  const categories = form.type === 'income' ? INCOME_CATEGORIES : EXPENSE_CATEGORIES
-
   return (
     <div className="space-y-4">
 
-      {/* ── Hero: saldo livre cruzado ── */}
+      {/* ── Hero ── */}
       <div className="bg-gradient-to-br from-indigo-600 to-violet-700 rounded-2xl p-5 text-white shadow-lg shadow-indigo-200">
         <p className="text-xs font-semibold uppercase tracking-widest opacity-60 mb-1">Saldo livre do mês</p>
         <p className={`text-4xl font-bold tracking-tight ${balanceColor}`}>{fmt(summary.freeBalance)}</p>
-
-        {/* Progress bar */}
         <div className="mt-4">
           <div className="flex justify-between text-xs opacity-60 mb-1.5">
             <span>Comprometido do salário</span>
             <span>{Math.round(summary.pct)}%</span>
           </div>
           <div className="h-2 bg-white/20 rounded-full overflow-hidden">
-            <div
-              className={`h-full ${pctColor} rounded-full transition-all`}
-              style={{ width: `${summary.pct}%` }}
-            />
+            <div className={`h-full ${pctColor} rounded-full transition-all`} style={{ width: `${summary.pct}%` }} />
           </div>
         </div>
-
-        {/* Mini stats 2x2 */}
         <div className="mt-4 pt-4 border-t border-white/20 grid grid-cols-2 gap-3">
           <div>
             <p className="text-[10px] uppercase tracking-wide opacity-50 mb-0.5">Renda total</p>
@@ -256,7 +234,7 @@ export default function DashboardTab({ transactions, cards, cardTransactions, bi
         </div>
       </div>
 
-      {/* ── Gráfico últimos 6 meses ── */}
+      {/* ── Gráfico ── */}
       <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4">
         <div className="flex items-center justify-between mb-3">
           <h2 className="font-bold text-gray-800 text-sm">Histórico (6 meses)</h2>
@@ -277,18 +255,14 @@ export default function DashboardTab({ transactions, cards, cardTransactions, bi
           </div>
           <ul className="divide-y divide-gray-50">
             {forecast.map((f, i) => (
-              <li key={i} className="flex items-center justify-between px-4 py-3 gap-3">
+              <li key={i} className="flex items-center gap-3 px-4 py-3">
                 <span className="text-sm font-semibold text-gray-600 w-16 flex-shrink-0">{f.label}</span>
                 <div className="flex-1 flex flex-col gap-1">
                   <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden">
-                    <div
-                      className={`h-full rounded-full ${f.balance < 0 ? 'bg-rose-400' : f.balance / (f.income || 1) < 0.15 ? 'bg-amber-400' : 'bg-emerald-400'}`}
-                      style={{ width: f.income > 0 ? `${Math.min((f.expenses / f.income) * 100, 100)}%` : '100%' }}
-                    />
+                    <div className={`h-full rounded-full ${f.balance < 0 ? 'bg-rose-400' : f.balance / (f.income || 1) < 0.15 ? 'bg-amber-400' : 'bg-emerald-400'}`}
+                      style={{ width: f.income > 0 ? `${Math.min((f.expenses / f.income) * 100, 100)}%` : '100%' }} />
                   </div>
-                  <p className="text-[10px] text-gray-400">
-                    Fixos: {fmt(f.expenses)} · Renda: {fmt(f.income)}
-                  </p>
+                  <p className="text-[10px] text-gray-400">Fixos: {fmt(f.expenses)} · Renda: {fmt(f.income)}</p>
                 </div>
                 <span className={`text-sm font-bold flex-shrink-0 ${f.balance >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
                   {f.balance >= 0 ? '+' : ''}{fmt(f.balance)}
@@ -310,9 +284,7 @@ export default function DashboardTab({ transactions, cards, cardTransactions, bi
               const status = getBillStatus(bill.daysUntil)
               return (
                 <li key={bill.id} className="flex items-center gap-3 px-4 py-3">
-                  <div className="w-8 h-8 bg-orange-50 rounded-xl flex items-center justify-center flex-shrink-0 text-base">
-                    📄
-                  </div>
+                  <div className="w-8 h-8 bg-orange-50 rounded-xl flex items-center justify-center flex-shrink-0 text-base">📄</div>
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-semibold text-gray-800 truncate">{bill.description}</p>
                     <span className={`inline-flex text-[10px] font-bold px-1.5 py-0.5 rounded-full mt-0.5 ${status.bg} ${status.text}`}>
@@ -330,7 +302,7 @@ export default function DashboardTab({ transactions, cards, cardTransactions, bi
       {/* ── Transações recentes ── */}
       <div className="flex items-center justify-between">
         <h2 className="font-bold text-gray-800 text-base">Transações do mês</h2>
-        <button onClick={() => setShowModal(true)}
+        <button onClick={openCreate}
           className="flex items-center gap-1.5 bg-indigo-600 text-white text-sm font-bold px-4 py-2 rounded-xl hover:bg-indigo-700 transition-colors shadow-sm shadow-indigo-200">
           <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
@@ -348,7 +320,7 @@ export default function DashboardTab({ transactions, cards, cardTransactions, bi
               </svg>
             </div>
             <p className="text-gray-500 text-sm font-medium">Nenhuma transação este mês</p>
-            <button onClick={() => setShowModal(true)} className="mt-2 text-indigo-600 text-sm font-semibold hover:underline">
+            <button onClick={openCreate} className="mt-2 text-indigo-600 text-sm font-semibold hover:underline">
               Adicionar transação
             </button>
           </div>
@@ -366,74 +338,87 @@ export default function DashboardTab({ transactions, cards, cardTransactions, bi
                 <span className={`text-sm font-bold flex-shrink-0 ${t.type === 'income' ? 'text-emerald-600' : 'text-rose-600'}`}>
                   {t.type === 'income' ? '+' : '-'}{fmt(Number(t.amount))}
                 </span>
-                <button onClick={() => handleDelete(t.id)}
-                  className="w-7 h-7 rounded-lg flex items-center justify-center text-gray-300 hover:text-rose-500 hover:bg-rose-50 transition-colors opacity-0 group-hover:opacity-100 ml-1">
-                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-                  </svg>
-                </button>
+                <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 ml-1 flex-shrink-0">
+                  <button onClick={() => openEdit(t)}
+                    className="w-7 h-7 rounded-lg flex items-center justify-center text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 transition-colors">
+                    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zm0 0L19.5 7.125" />
+                    </svg>
+                  </button>
+                  <button onClick={() => handleDelete(t.id)}
+                    className="w-7 h-7 rounded-lg flex items-center justify-center text-gray-300 hover:text-rose-500 hover:bg-rose-50 transition-colors">
+                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                  </button>
+                </div>
               </li>
             ))}
           </ul>
         )}
       </div>
 
-      {/* Modal nova transação */}
+      {/* ── Modal criar / editar transação ── */}
       {showModal && (
         <div className="fixed inset-0 bg-black/60 flex items-end sm:items-center justify-center z-50 p-4 backdrop-blur-sm"
           onClick={e => { if (e.target === e.currentTarget) { setShowModal(false); setError(null) } }}>
-          <div className="bg-white rounded-2xl w-full max-w-md p-6 space-y-4 shadow-2xl">
-            <div className="flex items-center justify-between">
-              <h2 className="text-lg font-bold text-gray-900">Nova transação</h2>
+          <div className="bg-white rounded-2xl w-full max-w-md shadow-2xl overflow-hidden">
+            <div className={`px-6 py-4 flex items-center justify-between ${editingTx ? 'bg-gradient-to-r from-slate-700 to-slate-800' : 'bg-gradient-to-r from-indigo-600 to-violet-600'}`}>
+              <div>
+                <h2 className="text-base font-bold text-white">{editingTx ? 'Editar transação' : 'Nova transação'}</h2>
+                {editingTx && <p className="text-xs text-white/60">{editingTx.description}</p>}
+              </div>
               <button onClick={() => { setShowModal(false); setError(null) }}
-                className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-gray-100 text-gray-400">
-                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                className="w-8 h-8 flex items-center justify-center rounded-full bg-white/20 text-white hover:bg-white/30">
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
                 </svg>
               </button>
             </div>
-            {error && <p className="text-xs text-rose-600 bg-rose-50 rounded-xl px-3 py-2 font-medium">{error}</p>}
-            <form onSubmit={handleSubmit} className="space-y-3">
-              <div className="grid grid-cols-2 gap-2 bg-gray-100 p-1 rounded-xl">
-                <button type="button" onClick={() => setForm(f => ({ ...f, type: 'expense', category: 'Outros' }))}
-                  className={`py-2.5 rounded-lg text-sm font-bold transition-colors ${form.type === 'expense' ? 'bg-white text-rose-600 shadow-sm' : 'text-gray-400'}`}>
-                  Despesa
+            <div className="p-6 space-y-3">
+              {error && <p className="text-xs text-rose-600 bg-rose-50 rounded-xl px-3 py-2 font-medium">{error}</p>}
+              <form onSubmit={handleSubmit} className="space-y-3">
+                <div className="grid grid-cols-2 gap-2 bg-gray-100 p-1 rounded-xl">
+                  <button type="button" onClick={() => setForm(f => ({ ...f, type: 'expense', category: 'Outros' }))}
+                    className={`py-2.5 rounded-lg text-sm font-bold transition-colors ${form.type === 'expense' ? 'bg-white text-rose-600 shadow-sm' : 'text-gray-400'}`}>
+                    Despesa
+                  </button>
+                  <button type="button" onClick={() => setForm(f => ({ ...f, type: 'income', category: 'Outros' }))}
+                    className={`py-2.5 rounded-lg text-sm font-bold transition-colors ${form.type === 'income' ? 'bg-white text-emerald-600 shadow-sm' : 'text-gray-400'}`}>
+                    Receita
+                  </button>
+                </div>
+                <div>
+                  <label className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5 block">Descrição</label>
+                  <input type="text" placeholder="Ex: Mercado, Salário..." required value={form.description}
+                    onChange={e => setForm(f => ({ ...f, description: e.target.value }))}
+                    className="w-full border border-gray-200 rounded-xl px-3.5 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent" />
+                </div>
+                <div>
+                  <label className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5 block">Valor</label>
+                  <CurrencyInput value={form.amount} placeholder="R$ 0,00" required
+                    onChange={v => setForm(f => ({ ...f, amount: v }))}
+                    className="w-full border border-gray-200 rounded-xl px-3.5 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent" />
+                </div>
+                <div>
+                  <label className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5 block">Categoria</label>
+                  <select value={form.category} onChange={e => setForm(f => ({ ...f, category: e.target.value }))}
+                    className="w-full border border-gray-200 rounded-xl px-3.5 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent bg-white">
+                    {categories.map(c => <option key={c}>{c}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5 block">Data</label>
+                  <input type="date" required value={form.date}
+                    onChange={e => setForm(f => ({ ...f, date: e.target.value }))}
+                    className="w-full border border-gray-200 rounded-xl px-3.5 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent" />
+                </div>
+                <button type="submit" disabled={submitting}
+                  className={`w-full py-3.5 rounded-xl text-sm font-bold disabled:opacity-50 transition-colors mt-2 ${form.type === 'expense' ? 'bg-rose-600 hover:bg-rose-700 text-white' : 'bg-emerald-600 hover:bg-emerald-700 text-white'}`}>
+                  {submitting ? 'Salvando...' : editingTx ? 'Salvar alterações' : 'Salvar transação'}
                 </button>
-                <button type="button" onClick={() => setForm(f => ({ ...f, type: 'income', category: 'Outros' }))}
-                  className={`py-2.5 rounded-lg text-sm font-bold transition-colors ${form.type === 'income' ? 'bg-white text-emerald-600 shadow-sm' : 'text-gray-400'}`}>
-                  Receita
-                </button>
-              </div>
-              <div>
-                <label className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5 block">Descrição</label>
-                <input type="text" placeholder="Ex: Mercado, Salário..." required value={form.description}
-                  onChange={e => setForm(f => ({ ...f, description: e.target.value }))}
-                  className="w-full border border-gray-200 rounded-xl px-3.5 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent" />
-              </div>
-              <div>
-                <label className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5 block">Valor</label>
-                <CurrencyInput value={form.amount} placeholder="R$ 0,00" required
-                  onChange={v => setForm(f => ({ ...f, amount: v }))}
-                  className="w-full border border-gray-200 rounded-xl px-3.5 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent" />
-              </div>
-              <div>
-                <label className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5 block">Categoria</label>
-                <select value={form.category} onChange={e => setForm(f => ({ ...f, category: e.target.value }))}
-                  className="w-full border border-gray-200 rounded-xl px-3.5 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent bg-white">
-                  {categories.map(c => <option key={c}>{c}</option>)}
-                </select>
-              </div>
-              <div>
-                <label className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5 block">Data</label>
-                <input type="date" required value={form.date}
-                  onChange={e => setForm(f => ({ ...f, date: e.target.value }))}
-                  className="w-full border border-gray-200 rounded-xl px-3.5 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent" />
-              </div>
-              <button type="submit" disabled={submitting}
-                className={`w-full py-3.5 rounded-xl text-sm font-bold disabled:opacity-50 transition-colors mt-2 ${form.type === 'expense' ? 'bg-rose-600 hover:bg-rose-700 text-white' : 'bg-emerald-600 hover:bg-emerald-700 text-white'}`}>
-                {submitting ? 'Salvando...' : 'Salvar transação'}
-              </button>
-            </form>
+              </form>
+            </div>
           </div>
         </div>
       )}

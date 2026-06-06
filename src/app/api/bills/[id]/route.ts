@@ -12,9 +12,16 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
   const { id } = await params
   const body = await request.json()
 
+  const updates: Record<string, unknown> = {}
+  if ('is_active' in body) updates.is_active = body.is_active
+  if ('description' in body) updates.description = body.description
+  if ('amount' in body) updates.amount = body.amount
+  if ('due_day' in body) updates.due_day = body.due_day
+  if ('is_recurring' in body) updates.is_recurring = body.is_recurring
+
   const { data, error } = await getClient()
     .from('bills')
-    .update({ is_active: body.is_active })
+    .update(updates)
     .eq('id', id)
     .select()
     .single()
